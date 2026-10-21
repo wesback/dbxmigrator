@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import inspect
+import json
 from typing import Any, Iterable
 import re
 
@@ -10,6 +14,7 @@ from .models import (
     ArtifactType,
     Dependency,
     DependencyResolution,
+    MigrationDisposition,
     ReadinessStatus,
 )
 from .registry import ArtifactHandler
@@ -37,6 +42,25 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 def _sdk_context(context: Any) -> Any:
     return context.source_client if hasattr(context, "source_client") else context
+
+
+def _decode_exported_source(content: Any) -> str:
+    if not isinstance(content, str) or not content:
+        return "" if content is None else str(content)
+    try:
+        return base64.b64decode(content.encode("ascii"), validate=True).decode("utf-8")
+    except (UnicodeDecodeError, UnicodeEncodeError, ValueError):
+        return content
+
+
+def _encode_source_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, bytes):
+        raw = content
+    else:
+        raw = str(content).encode("utf-8")
+    return base64.b64encode(raw).decode("ascii")
 
 
 def _sdk_items(result: Any, collection_name: str | None = None) -> list[Any]:
@@ -98,14 +122,14 @@ def _call_sdk_list(service: Any, collection_name: str | None = None) -> list[Any
     if service is None or not hasattr(service, "list"):
         return []
     try:
+        inspect.signature(service.list).bind()
         result = service.list()
-    except TypeError as exc:
-        if collection_name is None:
-            raise
+    except (TypeError, ValueError):
         try:
+            inspect.signature(service.list).bind(limit=1000)
             result = service.list(limit=1000)
-        except TypeError:
-            raise exc
+        except (TypeError, ValueError):
+            return []
     return _sdk_items(result, collection_name)
 
 
@@ -170,7 +194,8 @@ class NotebookHandler(ArtifactHandler):
                         path=artifact.identity.name,
                         format="SOURCE",
                     )
-                    source_text = str(getattr(exported, "content", "") or "")
+                    exported_content = getattr(exported, "content", "") or ""
+                    source_text = _decode_exported_source(exported_content)
                 except Exception:
                     source_text = ""
             if source_text:
@@ -204,7 +229,14 @@ class NotebookHandler(ArtifactHandler):
         content = artifact.source_definition.get("content")
         language = artifact.source_definition.get("language") or "PYTHON"
         path = artifact.identity.name
-        workspace.import_(path=path, format="SOURCE", language=language, content=content, overwrite=False)
+        encoded_content = _encode_source_content(content)
+        workspace.import_(
+            path=path,
+            format="SOURCE",
+            language=language,
+            content=encoded_content,
+            overwrite=False,
+        )
         return {"target_path": path}
 
 
@@ -328,6 +360,11 @@ class ClusterHandler(ArtifactHandler):
         if not create_spec.get("cluster_name"):
             create_spec["cluster_name"] = artifact.identity.name
         result = clusters.create(**create_spec)
+        if hasattr(result, "result") and callable(result.result):
+            try:
+                result = result.result()
+            except Exception:
+                raise
         target_id = getattr(result, "cluster_id", None)
         if target_id is None and isinstance(result, dict):
             target_id = result.get("cluster_id")
@@ -412,12 +449,89 @@ class GenericInventoryHandler(ArtifactHandler):
                     yield self._from_payload(item, key)
                 return
         client = _sdk_context(context)
+        if self.artifact_types[0] == ArtifactType.SCHEMA:
+            yield from self._discover_schemas(client)
+            return
+        if self.artifact_types[0] == ArtifactType.VOLUME:
+            yield from self._discover_volumes(client)
+            return
+        if self.artifact_types[0] == ArtifactType.UC_FUNCTION:
+            yield from self._discover_uc_functions(client)
+            return
         service_name = self._keys[0]
         service = getattr(client, service_name, None)
         if service is None:
             return
         for item in _call_sdk_list(service, service_name):
             yield self._from_payload(_as_dict(item), service_name)
+
+    def _sdk_catalogs(self, client: Any) -> list[Any]:
+        catalogs = getattr(client, "catalogs", None)
+        return _call_sdk_list(catalogs, "catalogs")
+
+    def _catalog_names(self, client: Any) -> list[str]:
+        names = []
+        for catalog in self._sdk_catalogs(client):
+            payload = _as_dict(catalog)
+            name = payload.get("name")
+            if name:
+                names.append(str(name))
+        return names
+
+    def _schema_names(self, client: Any) -> list[tuple[str, str]]:
+        schemas = getattr(client, "schemas", None)
+        if schemas is None or not hasattr(schemas, "list"):
+            return []
+        result = []
+        for catalog_name in self._catalog_names(client):
+            for schema in _sdk_items(
+                schemas.list(catalog_name=catalog_name),
+                "schemas",
+            ):
+                payload = _as_dict(schema)
+                schema_name = payload.get("name") or payload.get("full_name")
+                if schema_name:
+                    result.append((catalog_name, str(schema_name)))
+        return result
+
+    def _discover_schemas(self, client: Any) -> Iterable[Artifact]:
+        schemas = getattr(client, "schemas", None)
+        if schemas is None or not hasattr(schemas, "list"):
+            return
+        for catalog_name in self._catalog_names(client):
+            for item in _sdk_items(
+                schemas.list(catalog_name=catalog_name),
+                "schemas",
+            ):
+                yield self._from_payload(_as_dict(item), "schemas")
+
+    def _discover_volumes(self, client: Any) -> Iterable[Artifact]:
+        volumes = getattr(client, "volumes", None)
+        if volumes is None or not hasattr(volumes, "list"):
+            return
+        for catalog_name, schema_name in self._schema_names(client):
+            for item in _sdk_items(
+                volumes.list(
+                    catalog_name=catalog_name,
+                    schema_name=schema_name,
+                ),
+                "volumes",
+            ):
+                yield self._from_payload(_as_dict(item), "volumes")
+
+    def _discover_uc_functions(self, client: Any) -> Iterable[Artifact]:
+        functions = getattr(client, "functions", None)
+        if functions is None or not hasattr(functions, "list"):
+            return
+        for catalog_name, schema_name in self._schema_names(client):
+            for item in _sdk_items(
+                functions.list(
+                    catalog_name=catalog_name,
+                    schema_name=schema_name,
+                ),
+                "functions",
+            ):
+                yield self._from_payload(_as_dict(item), "functions")
 
     def _from_payload(self, item: Any, collection: str) -> Artifact:
         payload = _as_dict(item)
@@ -428,6 +542,24 @@ class GenericInventoryHandler(ArtifactHandler):
             or payload.get("path")
             or payload.get("policy_id")
         )
+        if identifier is None:
+            canonical = json.dumps(payload, sort_keys=True, default=str)
+            fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+            return Artifact(
+                identity=ArtifactIdentity(
+                    key=f"{self.artifact_types[0].value}:UNKNOWN:{fingerprint}",
+                    artifact_type=self.artifact_types[0],
+                    name=self.artifact_types[0].value,
+                ),
+                source_definition=payload,
+                migration_strategy=self._strategy,
+                validation_strategy="VERIFY_TARGET_ARTIFACT",
+                migration_provider=self.provider,
+                disposition=MigrationDisposition.UNSUPPORTED,
+                migration_status=ArtifactMigrationStatus.UNSUPPORTED,
+                readiness_status=ReadinessStatus.NOT_APPLICABLE,
+                blockers=["Artifact inventory record has no stable identifier"],
+            )
         name = payload.get("name") or payload.get("path") or str(identifier)
         return Artifact(
             identity=ArtifactIdentity(

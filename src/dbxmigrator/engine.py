@@ -76,13 +76,24 @@ class MigrationEngine:
             current = self.discover(context)
             current_hashes = {artifact.key: artifact.source_hash() for artifact in current}
             drifted = []
+            missing = []
             for artifact in plan.artifacts:
                 if current_hashes.get(artifact.key) != artifact.source_hash():
-                    drifted.append(artifact.key)
-            if drifted:
+                    if artifact.key not in current_hashes:
+                        missing.append(artifact.key)
+                    else:
+                        drifted.append(artifact.key)
+            new = sorted(set(current_hashes) - {artifact.key for artifact in plan.artifacts})
+            if drifted or missing or new:
                 plan.lifecycle_state = "DRIFT_BLOCKED"
                 plan.blockers = sorted(set(plan.blockers).union(
                     f"Source drift detected for: {key}" for key in drifted
+                ))
+                plan.blockers = sorted(set(plan.blockers).union(
+                    f"Approved artifact missing from source: {key}" for key in missing
+                ))
+                plan.blockers = sorted(set(plan.blockers).union(
+                    f"New source artifact not in approved plan: {key}" for key in new
                 ))
                 plan.warnings = list(set(plan.warnings))
                 self.store.save_plan(plan)
@@ -91,6 +102,8 @@ class MigrationEngine:
                     {
                         "event": "APPROVAL_BLOCKED_DRIFT",
                         "artifacts": drifted,
+                        "missing": missing,
+                        "new": new,
                     },
                 )
                 return plan
@@ -183,6 +196,21 @@ class MigrationEngine:
                     if artifact.disposition == MigrationDisposition.BLOCKED_DEPENDENCY
                     else ArtifactMigrationStatus.MANUAL_REQUIRED
                 )
+                continue
+            if artifact.blockers:
+                artifact.migration_status = ArtifactMigrationStatus.BLOCKED
+                artifact.readiness_status = ReadinessStatus.BLOCKED
+                self.store.append_event(
+                    migration_plan_id,
+                    {
+                        "event": "ARTIFACT_BLOCKED_BEFORE_EXECUTION",
+                        "artifact_key": artifact.key,
+                        "migration_status": artifact.migration_status.value,
+                        "readiness_status": artifact.readiness_status.value,
+                        "blockers": artifact.blockers,
+                    },
+                )
+                self.store.save_plan(plan)
                 continue
             if not artifact.migration_strategy:
                 artifact.migration_status = ArtifactMigrationStatus.BLOCKED

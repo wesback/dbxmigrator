@@ -151,6 +151,55 @@ def test_assess_mode_without_target_infers_assessment_only(tmp_path):
     assert config.target_workspace == {}
 
 
+def test_approval_blocks_missing_and_new_source_artifacts(tmp_path):
+    context = make_context(notebooks=[{"path": "/Shared/old", "object_id": 1}])
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    config = MigrationConfig(
+        dry_run=True,
+        source_workspace={"workspace": "source"},
+        target_workspace={"workspace": "target"},
+    )
+    plan = engine.create_dry_run(
+        make_context(notebooks=[{"path": "/Shared/old", "object_id": 1}]),
+        config.to_dict(),
+    )
+    changed_context = make_context(
+        notebooks=[
+            {"path": "/Shared/old", "object_id": 1},
+            {"path": "/Shared/new", "object_id": 2},
+        ]
+    )
+
+    approved = engine.approve_plan(
+        plan.migration_plan_id,
+        "operator",
+        context=changed_context,
+    )
+
+    assert approved.lifecycle_state == "DRIFT_BLOCKED"
+    assert any("new source artifact" in blocker.lower() for blocker in approved.blockers)
+
+
+def test_execution_records_blocked_artifact_without_mutation(tmp_path):
+    context = make_context(notebooks=[{"path": "/Shared/test", "object_id": 1}])
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(dry_run=False, target_workspace={"workspace": "target"}).to_dict(),
+    )
+    notebook = plan.artifacts[0]
+    notebook.blockers = ["Unresolved target dependency"]
+    plan.lifecycle_state = "APPROVED"
+    engine.store.save_plan(plan)
+
+    executed = engine.execute(plan.migration_plan_id, context)
+
+    assert executed.lifecycle_state == "VALIDATED"
+    executed_notebook = executed.artifacts[0]
+    assert executed_notebook.migration_status == ArtifactMigrationStatus.BLOCKED
+    assert executed_notebook.readiness_status == ReadinessStatus.BLOCKED
+
+
 def test_cluster_discovery_and_migration_handler_are_available(tmp_path):
     context = make_context(
         clusters=[
