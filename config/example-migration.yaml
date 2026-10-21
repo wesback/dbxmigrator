@@ -1,0 +1,19 @@
+migration:
+  scope: ALL
+  workspace_artifacts: true
+  data:
+    enabled: true
+  unity_catalog:
+    mode: NONE
+  conflict_strategy: FAIL
+  dry_run: true
+  storage:
+    plan_store: /dbfs/migration-plans
+
+source:
+  workspace: source-workspace
+  region: region-a
+
+target:
+  workspace: target-workspace
+  region: region-b

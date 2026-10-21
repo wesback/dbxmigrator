@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbx-migration-accelerator"
+version = "0.1.0"
+description = "Artifact-first Azure Databricks cross-region migration accelerator"
+requires-python = ">=3.10"
+dependencies = []
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+databricks = ["databricks-sdk>=0.30.0", "PyYAML>=6.0"]
+dev = ["pytest>=8.0", "PyYAML>=6.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
