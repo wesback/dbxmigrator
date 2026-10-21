@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dbx-migration-accelerator"
+name = "dbxmigrator"
 version = "0.1.0"
 description = "Artifact-first Azure Databricks cross-region migration accelerator"
 requires-python = ">=3.10"

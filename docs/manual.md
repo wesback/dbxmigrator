@@ -19,6 +19,15 @@ The accelerator does not treat Unity Catalog, physical data migration, or worksp
 
 Example package installation:
 
+For a clone-free installation from the source-workspace notebook:
+
+```python
+%pip install "dbxmigrator[databricks] @ git+https://github.com/wesback/dbxmigrator.git@main"
+dbutils.library.restartPython()
+```
+
+For an installation from Databricks Repos:
+
 ```python
 %pip install -e "/Workspace/Repos/wesback/dbxmigrator[databricks]"
 dbutils.library.restartPython()

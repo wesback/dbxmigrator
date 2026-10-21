@@ -38,6 +38,24 @@ Validation
 
 ## Quick start
 
+### Install without cloning into Databricks Repos
+
+From a source-workspace Databricks notebook:
+
+```python
+%pip install "dbxmigrator[databricks] @ git+https://github.com/wesback/dbxmigrator.git@main"
+dbutils.library.restartPython()
+```
+
+The package name matches the project metadata and Python import package. Upgrade an existing installation with:
+
+```python
+%pip install --upgrade --force-reinstall "dbxmigrator[databricks] @ git+https://github.com/wesback/dbxmigrator.git@main"
+dbutils.library.restartPython()
+```
+
+### Install from Databricks Repos
+
 1. Clone this repository into Databricks Repos in the source workspace.
 2. Install the package on the migration notebook:
 
