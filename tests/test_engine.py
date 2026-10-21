@@ -278,3 +278,36 @@ def test_menu_artifact_types_are_registered_for_assessment():
         "SCHEMA",
     }
     assert expected.issubset(discovered_types)
+
+
+def test_sample_notebook_and_system_serving_endpoint_are_skipped(tmp_path):
+    context = make_context(
+        notebooks=[
+            {
+                "path": "/Shared/Databricks Samples/ETL",
+                "object_id": 101,
+            }
+        ],
+        serving_endpoints=[
+            {"name": "databricks-meta-llama-3-70b-instruct"},
+        ],
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(
+            dry_run=True,
+            assessment_only=True,
+            unity_catalog_mode="ASSESS",
+        ).to_dict(),
+    )
+
+    assert len(plan.artifacts) == 2
+    assert all(
+        artifact.metadata["system_managed"]
+        for artifact in plan.artifacts
+    )
+    assert all(
+        artifact.migration_status == ArtifactMigrationStatus.SKIPPED
+        for artifact in plan.artifacts
+    )

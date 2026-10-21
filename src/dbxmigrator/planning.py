@@ -14,6 +14,70 @@ from .models import (
 from .registry import ArtifactHandlerRegistry
 
 
+SYSTEM_ARTIFACT_TYPES = {
+    ArtifactType.RUN,
+    ArtifactType.QUERY_HISTORY,
+    ArtifactType.AI_PLAYGROUND,
+}
+
+SYSTEM_PATH_MARKERS = (
+    "/databricks/",
+    "/databricks-demos/",
+    "/databricks_",
+    "/shared/databricks ",
+    "/shared/databricks_",
+    "/shared/databricks/",
+    "/shared/ubuntu/",
+    "/shared/sample",
+    "/shared/samples",
+    "/workspace/shared/databricks ",
+    "/workspace/shared/databricks_",
+)
+
+SYSTEM_NAME_MARKERS = (
+    "databricks sample",
+    "databricks-sample",
+    "databricks_sample",
+    "sample notebook",
+    "__databricks",
+    "system.",
+)
+
+
+def is_system_managed_artifact(artifact: Artifact) -> bool:
+    if artifact.artifact_type in SYSTEM_ARTIFACT_TYPES:
+        return True
+
+    payload = artifact.source_definition
+    for flag in ("is_sample", "sample", "system_managed", "is_system"):
+        if payload.get(flag) is True:
+            return True
+
+    name = str(
+        payload.get("name")
+        or payload.get("path")
+        or payload.get("full_name")
+        or artifact.identity.name
+        or ""
+    ).lower()
+    path = str(payload.get("path") or artifact.identity.parent or "").lower()
+
+    if artifact.artifact_type == ArtifactType.CATALOG:
+        if name in {"system", "samples", "hive_metastore"}:
+            return True
+
+    if artifact.artifact_type == ArtifactType.SERVING:
+        if name.startswith("system_") or name.startswith("databricks-"):
+            return True
+        if payload.get("creator") in {"databricks", "Databricks"}:
+            return True
+
+    return (
+        any(marker in path for marker in SYSTEM_PATH_MARKERS)
+        or any(marker in name for marker in SYSTEM_NAME_MARKERS)
+    )
+
+
 class MigrationPlanner:
     def __init__(self, registry: ArtifactHandlerRegistry) -> None:
         self.registry = registry
@@ -94,6 +158,16 @@ class MigrationPlanner:
             else:
                 artifact.metadata["dimension"] = "WORKSPACE"
 
+            if is_system_managed_artifact(artifact):
+                artifact.metadata["system_managed"] = True
+                artifact.disposition = MigrationDisposition.SKIP_BY_POLICY
+                artifact.migration_status = ArtifactMigrationStatus.SKIPPED
+                artifact.readiness_status = ReadinessStatus.NOT_APPLICABLE
+                artifact.warnings.append(
+                    "System-managed or sample artifact; migration is excluded by policy"
+                )
+                classified.append(artifact)
+                continue
             if artifact_type in exclude or (include and artifact_type not in include):
                 artifact.disposition = MigrationDisposition.SKIP_BY_POLICY
                 artifact.migration_status = ArtifactMigrationStatus.SKIPPED
