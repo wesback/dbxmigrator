@@ -37,14 +37,19 @@ package_source = dbutils.widgets.get("package_source")
 
 def ensure_dbxmigrator(package_source):
     try:
-        importlib.import_module("dbxmigrator")
-        needs_install = False
+        package = importlib.import_module("dbxmigrator")
+        planning_module = importlib.import_module("dbxmigrator.planning")
+        store_module = importlib.import_module("dbxmigrator.store")
+        needs_install = not (
+            hasattr(planning_module, "is_system_managed_artifact")
+            and hasattr(store_module.MigrationStore, "normalize_root")
+        )
     except ModuleNotFoundError as import_error:
         if import_error.name != "dbxmigrator":
             raise
         needs_install = True
 
-    if needs_install or package_source.startswith(("git+", "http://", "https://")):
+    if needs_install:
         subprocess.check_call([
             sys.executable,
             "-m",
@@ -55,12 +60,6 @@ def ensure_dbxmigrator(package_source):
             "dbxmigrator[databricks] @ "
             + package_source,
         ])
-        if "dbutils" in globals():
-            dbutils.library.restartPython()
-        raise SystemExit(
-            "dbxmigrator dependencies were installed and the Python kernel restart "
-            "was initiated. Rerun this notebook."
-        )
         for module_name in [
             name
             for name in list(sys.modules)
