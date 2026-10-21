@@ -350,3 +350,41 @@ def test_builtin_uc_and_sample_catalog_objects_are_skipped(tmp_path):
         artifact.migration_status == ArtifactMigrationStatus.SKIPPED
         for artifact in plan.artifacts
     )
+
+
+def test_user_artifacts_containing_sample_names_are_not_skipped(tmp_path):
+    context = make_context(
+        notebooks=[
+            {"path": "/Shared/SampleReporting/ETL", "object_id": 201},
+            {"path": "/Users/alice/customer_sample_pipeline", "object_id": 202},
+        ],
+        catalogs=[
+            {"name": "customer_samples"},
+            {"name": "analytics_sample"},
+        ],
+        schemas=[
+            {
+                "name": "sample_reporting",
+                "catalog_name": "customer_samples",
+                "full_name": "customer_samples.sample_reporting",
+            },
+        ],
+        serving_endpoints=[
+            {"name": "customer-databricks-model"},
+        ],
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(
+            dry_run=True,
+            assessment_only=True,
+            unity_catalog_mode="ASSESS",
+        ).to_dict(),
+    )
+
+    assert plan.artifacts
+    assert all(
+        not artifact.metadata.get("system_managed")
+        for artifact in plan.artifacts
+    )

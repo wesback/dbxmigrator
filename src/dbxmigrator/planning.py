@@ -20,29 +20,12 @@ SYSTEM_ARTIFACT_TYPES = {
     ArtifactType.AI_PLAYGROUND,
 }
 
-SYSTEM_PATH_MARKERS = (
-    "/databricks/",
-    "/databricks-demos/",
-    "/databricks_",
-    "/shared/databricks ",
-    "/shared/databricks_",
-    "/shared/databricks/",
-    "/shared/ubuntu/",
-    "/shared/sample",
-    "/shared/samples",
-    "/workspace/shared/databricks ",
-    "/workspace/shared/databricks_",
+SYSTEM_NOTEBOOK_PATH_PREFIXES = (
+    "/shared/databricks samples/",
+    "/shared/databricks-demos/",
+    "/workspace/shared/databricks samples/",
+    "/workspace/shared/databricks-demos/",
 )
-
-SYSTEM_NAME_MARKERS = (
-    "databricks sample",
-    "databricks-sample",
-    "databricks_sample",
-    "sample notebook",
-    "__databricks",
-    "system.",
-)
-
 
 def is_system_managed_artifact(artifact: Artifact) -> bool:
     if artifact.artifact_type in SYSTEM_ARTIFACT_TYPES:
@@ -79,21 +62,22 @@ def is_system_managed_artifact(artifact: Artifact) -> bool:
 
     if catalog_name in {"system", "samples"}:
         return True
-    if schema_name in {"information_schema", "system"}:
+    if catalog_name == "system" and schema_name == "information_schema":
         return True
     if full_name.startswith(("system.", "samples.", "information_schema.")):
         return True
 
     if artifact.artifact_type == ArtifactType.SERVING:
-        if name.startswith("system_") or name.startswith("databricks-"):
+        if name.startswith(("system_", "databricks-")):
             return True
         if payload.get("creator") in {"databricks", "Databricks"}:
             return True
 
-    return (
-        any(marker in path for marker in SYSTEM_PATH_MARKERS)
-        or any(marker in name for marker in SYSTEM_NAME_MARKERS)
-    )
+    if artifact.artifact_type == ArtifactType.NOTEBOOK:
+        return any(
+            path.startswith(prefix) for prefix in SYSTEM_NOTEBOOK_PATH_PREFIXES
+        )
+    return False
 
 
 class MigrationPlanner:
