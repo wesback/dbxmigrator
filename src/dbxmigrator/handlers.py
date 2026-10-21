@@ -39,6 +39,76 @@ def _sdk_context(context: Any) -> Any:
     return context.source_client if hasattr(context, "source_client") else context
 
 
+def _sdk_items(result: Any, collection_name: str | None = None) -> list[Any]:
+    """Normalize SDK iterable and paginated response shapes."""
+    if result is None:
+        return []
+    if isinstance(result, (list, tuple, set)):
+        return list(result)
+    if isinstance(result, (str, bytes, dict)):
+        if isinstance(result, dict):
+            candidate_names = (
+                collection_name,
+                "items",
+                "results",
+                "objects",
+                "resources",
+                "data",
+            )
+            for candidate in candidate_names:
+                if candidate and isinstance(result.get(candidate), (list, tuple)):
+                    return list(result[candidate])
+        return []
+
+    if isinstance(result, Iterable):
+        try:
+            return list(result)
+        except TypeError:
+            pass
+
+    payload = _as_dict(result)
+    candidate_names = (
+        collection_name,
+        "items",
+        "results",
+        "objects",
+        "resources",
+        "data",
+        "queries",
+        "jobs",
+        "clusters",
+        "dashboards",
+        "warehouses",
+        "experiments",
+        "models",
+        "agents",
+    )
+    for candidate in candidate_names:
+        value = payload.get(candidate)
+        if isinstance(value, (list, tuple)):
+            return list(value)
+
+    for value in payload.values():
+        if isinstance(value, (list, tuple)):
+            return list(value)
+    return []
+
+
+def _call_sdk_list(service: Any, collection_name: str | None = None) -> list[Any]:
+    if service is None or not hasattr(service, "list"):
+        return []
+    try:
+        result = service.list()
+    except TypeError as exc:
+        if collection_name is None:
+            raise
+        try:
+            result = service.list(limit=1000)
+        except TypeError:
+            raise exc
+    return _sdk_items(result, collection_name)
+
+
 class NotebookHandler(ArtifactHandler):
     artifact_types = (ArtifactType.NOTEBOOK,)
     provider = "Databricks Workspace API"
@@ -60,7 +130,7 @@ class NotebookHandler(ArtifactHandler):
             if directory in seen:
                 continue
             seen.add(directory)
-            for item in workspace.list(directory):
+            for item in _sdk_items(workspace.list(directory), "objects"):
                 as_dict = _as_dict(item)
                 object_type = getattr(item, "object_type", as_dict.get("object_type"))
                 path = getattr(item, "path", as_dict.get("path"))
@@ -152,7 +222,7 @@ class JobHandler(ArtifactHandler):
         jobs = getattr(client, "jobs", None)
         if jobs is None:
             return
-        for item in jobs.list():
+        for item in _call_sdk_list(jobs, "jobs"):
             yield self._from_payload(_as_dict(item))
 
     def _from_payload(self, item: dict[str, Any]) -> Artifact:
@@ -188,7 +258,7 @@ class ClusterHandler(ArtifactHandler):
         clusters = getattr(client, "clusters", None)
         if clusters is None or not hasattr(clusters, "list"):
             return
-        for item in clusters.list():
+        for item in _call_sdk_list(clusters, "clusters"):
             yield self._from_payload(_as_dict(item))
 
     def _from_payload(self, item: Any) -> Artifact:
@@ -346,9 +416,8 @@ class GenericInventoryHandler(ArtifactHandler):
         service = getattr(client, service_name, None)
         if service is None:
             return
-        if hasattr(service, "list"):
-            for item in service.list():
-                yield self._from_payload(_as_dict(item), service_name)
+        for item in _call_sdk_list(service, service_name):
+            yield self._from_payload(_as_dict(item), service_name)
 
     def _from_payload(self, item: Any, collection: str) -> Artifact:
         payload = _as_dict(item)

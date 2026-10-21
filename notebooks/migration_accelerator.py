@@ -62,10 +62,11 @@ def ensure_dbxmigrator(package_source):
             "dbxmigrator[databricks] @ "
             + package_source,
         ])
-        raise RuntimeError(
-            "dbxmigrator dependencies were installed. "
-            "Restart the Python kernel with %restart_python or "
-            "dbutils.library.restartPython(), then rerun the notebook."
+        if "dbutils" in globals():
+            dbutils.library.restartPython()
+        raise SystemExit(
+            "dbxmigrator dependencies were installed and the Python kernel restart "
+            "was initiated. Rerun this notebook."
         )
         for module_name in [
             name
