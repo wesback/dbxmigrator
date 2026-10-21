@@ -37,21 +37,14 @@ package_source = dbutils.widgets.get("package_source")
 
 def ensure_dbxmigrator(package_source):
     try:
-        package = importlib.import_module("dbxmigrator")
+        importlib.import_module("dbxmigrator")
+        needs_install = False
     except ModuleNotFoundError as import_error:
         if import_error.name != "dbxmigrator":
             raise
-        package = None
+        needs_install = True
 
-    needs_install = package is None
-    if package is not None:
-        try:
-            store_module = importlib.import_module("dbxmigrator.store")
-            needs_install = not hasattr(store_module.MigrationStore, "normalize_root")
-        except (AttributeError, ModuleNotFoundError):
-            needs_install = True
-
-    if needs_install:
+    if needs_install or package_source.startswith(("git+", "http://", "https://")):
         subprocess.check_call([
             sys.executable,
             "-m",

@@ -61,10 +61,28 @@ def is_system_managed_artifact(artifact: Artifact) -> bool:
         or ""
     ).lower()
     path = str(payload.get("path") or artifact.identity.parent or "").lower()
+    catalog_name = str(
+        payload.get("catalog_name")
+        or payload.get("catalog")
+        or ""
+    ).lower()
+    schema_name = str(
+        payload.get("schema_name")
+        or payload.get("schema")
+        or ""
+    ).lower()
+    full_name = str(payload.get("full_name") or "").lower()
 
     if artifact.artifact_type == ArtifactType.CATALOG:
         if name in {"system", "samples", "hive_metastore"}:
             return True
+
+    if catalog_name in {"system", "samples"}:
+        return True
+    if schema_name in {"information_schema", "system"}:
+        return True
+    if full_name.startswith(("system.", "samples.", "information_schema.")):
+        return True
 
     if artifact.artifact_type == ArtifactType.SERVING:
         if name.startswith("system_") or name.startswith("databricks-"):

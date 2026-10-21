@@ -311,3 +311,42 @@ def test_sample_notebook_and_system_serving_endpoint_are_skipped(tmp_path):
         artifact.migration_status == ArtifactMigrationStatus.SKIPPED
         for artifact in plan.artifacts
     )
+
+
+def test_builtin_uc_and_sample_catalog_objects_are_skipped(tmp_path):
+    context = make_context(
+        catalogs=[
+            {"name": "system", "is_system": True},
+            {"name": "samples", "is_sample": True},
+        ],
+        schemas=[
+            {"name": "bakehouse", "catalog_name": "samples", "full_name": "samples.bakehouse"},
+            {"name": "information_schema", "catalog_name": "system"},
+        ],
+        uc_functions=[
+            {"name": "ai_translate", "catalog_name": "system", "full_name": "system.ai.ai_translate"},
+        ],
+        volumes=[
+            {"name": "datasets", "catalog_name": "samples", "full_name": "samples.datasets.datasets"},
+        ],
+        query_history=[{"query_id": "one"}, {"query_id": "two"}],
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(
+            dry_run=True,
+            assessment_only=True,
+            unity_catalog_mode="ASSESS",
+        ).to_dict(),
+    )
+
+    assert plan.artifacts
+    assert all(
+        artifact.metadata["system_managed"]
+        for artifact in plan.artifacts
+    )
+    assert all(
+        artifact.migration_status == ArtifactMigrationStatus.SKIPPED
+        for artifact in plan.artifacts
+    )
