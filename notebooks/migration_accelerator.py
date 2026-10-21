@@ -37,11 +37,21 @@ package_source = dbutils.widgets.get("package_source")
 
 def ensure_dbxmigrator(package_source):
     try:
-        return importlib.import_module("dbxmigrator")
+        package = importlib.import_module("dbxmigrator")
     except ModuleNotFoundError as import_error:
         if import_error.name != "dbxmigrator":
             raise
+        package = None
 
+    needs_install = package is None
+    if package is not None:
+        try:
+            store_module = importlib.import_module("dbxmigrator.store")
+            needs_install = not hasattr(store_module.MigrationStore, "normalize_root")
+        except (AttributeError, ModuleNotFoundError):
+            needs_install = True
+
+    if needs_install:
         subprocess.check_call([
             sys.executable,
             "-m",
@@ -52,6 +62,17 @@ def ensure_dbxmigrator(package_source):
             "dbxmigrator[databricks] @ "
             + package_source,
         ])
+        raise RuntimeError(
+            "dbxmigrator dependencies were installed. "
+            "Restart the Python kernel with %restart_python or "
+            "dbutils.library.restartPython(), then rerun the notebook."
+        )
+        for module_name in [
+            name
+            for name in list(sys.modules)
+            if name == "dbxmigrator" or name.startswith("dbxmigrator.")
+        ]:
+            sys.modules.pop(module_name, None)
         importlib.invalidate_caches()
         try:
             return importlib.import_module("dbxmigrator")
@@ -60,6 +81,8 @@ def ensure_dbxmigrator(package_source):
                 "dbxmigrator still could not be imported after package installation. "
                 "Detach and reattach the notebook cluster, then rerun the notebook."
             ) from retry_error
+
+    return package
 
 
 accelerator = ensure_dbxmigrator(package_source)
@@ -74,8 +97,14 @@ from dbxmigrator.auth import build_workspace_client
 
 def load_config(path):
     if path.startswith("dbfs:/"):
-        local_path = "/dbfs/" + path.removeprefix("dbfs:/")
-        path = local_path
+        text = dbutils.fs.head(path, 1000000)
+        if path.lower().endswith((".yaml", ".yml")):
+            if yaml is None:
+                raise RuntimeError("PyYAML is required for YAML configuration")
+            payload = yaml.safe_load(text)
+        else:
+            payload = json.loads(text)
+        return MigrationConfig.from_dict(payload)
     elif path.startswith("workspace:/"):
         path = "/Workspace/" + path.removeprefix("workspace:/")
 
@@ -105,11 +134,24 @@ except ImportError:
 
 
 config = load_config(config_path)
-store_root = config.storage.get(
-    "plan_store",
-    "/Workspace/Shared/dbxmigrator/plans",
+configured_store = config.storage.get("plan_store")
+store_root = (
+    "/Workspace/Shared/dbxmigrator/plans"
+    if (
+        not configured_store
+        or (
+            isinstance(configured_store, str)
+            and configured_store.startswith("/dbfs/")
+        )
+    )
+    else configured_store
 )
 store = MigrationStore(store_root)
+print(
+    "Migration plan store: "
+    + str(store.root)
+    + (" (configured legacy /dbfs path normalized)" if store.fallback_used else "")
+)
 engine = MigrationEngine(default_registry(), store)
 
 secret_resolver = lambda scope, key: dbutils.secrets.get(scope, key)

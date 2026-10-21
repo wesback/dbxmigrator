@@ -50,7 +50,7 @@ dbutils.library.restartPython()
 The package name matches the project metadata and Python import package. Upgrade an existing installation with:
 
 ```python
-%pip install --upgrade --force-reinstall "dbxmigrator[databricks] @ git+https://github.com/wesback/dbxmigrator.git@main"
+%pip install --upgrade "dbxmigrator[databricks] @ git+https://github.com/wesback/dbxmigrator.git@main"
 dbutils.library.restartPython()
 ```
 

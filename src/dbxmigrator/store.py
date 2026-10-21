@@ -20,12 +20,6 @@ class MigrationStore:
 
         requested_root = self.normalize_root(root)
         candidates = [requested_root]
-        if str(requested_root).startswith("/dbfs/"):
-            relative = str(requested_root)[len("/dbfs/") :]
-            candidates.insert(
-                0,
-                Path("/Workspace/Shared/dbxmigrator") / relative,
-            )
 
         candidates.extend([
             Path("/Workspace/Shared/dbxmigrator/plans"),
