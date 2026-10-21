@@ -69,6 +69,7 @@ class MigrationPlanner:
         migration = configuration.get("migration", {})
         workspace_artifacts = bool(migration.get("workspace_artifacts", True))
         data_enabled = bool(migration.get("data", {}).get("enabled", True))
+        assessment_only = bool(migration.get("assessment_only", False))
         data_types = {
             ArtifactType.DBFS,
             ArtifactType.VOLUME,
@@ -97,6 +98,23 @@ class MigrationPlanner:
                 artifact.disposition = MigrationDisposition.SKIP_BY_POLICY
                 artifact.migration_status = ArtifactMigrationStatus.SKIPPED
                 artifact.readiness_status = ReadinessStatus.NOT_APPLICABLE
+                classified.append(artifact)
+                continue
+            if assessment_only:
+                artifact.metadata["assessment_only"] = True
+                artifact.metadata["target_required"] = False
+                artifact.disposition = (
+                    MigrationDisposition.MANUAL_REQUIRED
+                    if artifact.artifact_type in governance_types
+                    else MigrationDisposition.MIGRATE_AUTOMATICALLY
+                )
+                artifact.migration_status = ArtifactMigrationStatus.PLANNED
+                artifact.readiness_status = ReadinessStatus.WARNING
+                artifact.warnings.append(
+                    "Assessment-only mode: target configuration is not required and no migration or UC mutation has been planned for execution"
+                )
+                handler = self.registry.get(artifact.artifact_type)
+                handler.plan(context, artifact)
                 classified.append(artifact)
                 continue
             if artifact.artifact_type in data_types and not data_enabled:

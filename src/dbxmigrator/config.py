@@ -27,6 +27,7 @@ class MigrationConfig:
     workspace_artifacts: bool = True
     data_enabled: bool = True
     unity_catalog_mode: str = "NONE"
+    assessment_only: bool = False
     conflict_strategy: str = "FAIL"
     dry_run: bool = True
     source_workspace: dict[str, Any] = field(default_factory=dict)
@@ -42,8 +43,15 @@ class MigrationConfig:
         migration = payload.get("migration", payload)
         data = migration.get("data", {})
         uc = migration.get("unity_catalog", {})
-        source = payload.get("source", {})
-        target = payload.get("target", {})
+        source = payload.get("source") or {}
+        target = payload.get("target") or {}
+        uc_mode = str(
+            uc.get("mode", "NONE") if isinstance(uc, dict) else uc
+        ).upper()
+        if "assessment_only" in migration:
+            assessment_only = bool(migration["assessment_only"])
+        else:
+            assessment_only = uc_mode == "ASSESS" and not target
         if isinstance(data, dict):
             data_enabled = bool(data.get("enabled", True))
         else:
@@ -52,9 +60,8 @@ class MigrationConfig:
             scope=str(migration.get("scope", "ALL")).upper(),
             workspace_artifacts=bool(migration.get("workspace_artifacts", True)),
             data_enabled=data_enabled,
-            unity_catalog_mode=str(
-                uc.get("mode", "NONE") if isinstance(uc, dict) else uc
-            ).upper(),
+            unity_catalog_mode=uc_mode,
+            assessment_only=assessment_only,
             conflict_strategy=str(migration.get("conflict_strategy", "FAIL")).upper(),
             dry_run=bool(migration.get("dry_run", True)),
             source_workspace=source if isinstance(source, dict) else {},
@@ -91,6 +98,7 @@ class MigrationConfig:
                 "workspace_artifacts": self.workspace_artifacts,
                 "data": {"enabled": self.data_enabled},
                 "unity_catalog": {"mode": self.unity_catalog_mode},
+                "assessment_only": self.assessment_only,
                 "conflict_strategy": self.conflict_strategy,
                 "dry_run": self.dry_run,
                 "include_artifact_types": self.include_artifact_types,

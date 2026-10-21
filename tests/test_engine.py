@@ -90,3 +90,62 @@ def test_execution_requires_approval(tmp_path):
         assert False, "Execution should require approval"
     except PermissionError:
         pass
+
+
+def test_assessment_only_discovers_without_target(tmp_path):
+    context = make_context(
+        notebooks=[{"path": "/Shared/test", "object_id": 1}],
+        jobs=[{"job_id": 42, "settings": {"name": "nightly"}}],
+        hive_tables=[{"name": "raw.customer", "table_type": "MANAGED"}],
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    config = MigrationConfig.from_dict(
+        {
+            "migration": {
+                "scope": "ALL",
+                "workspace_artifacts": True,
+                "data": {"enabled": True},
+                "unity_catalog": {"mode": "ASSESS"},
+                "assessment_only": True,
+                "dry_run": True,
+            },
+            "source": {
+                "workspace": "source-workspace",
+                "region": "eastus",
+            },
+        }
+    )
+
+    plan = engine.create_dry_run(context, config.to_dict())
+
+    assert len(plan.artifacts) == 3
+    assert all(
+        artifact.metadata["assessment_only"]
+        for artifact in plan.artifacts
+    )
+    assert all(
+        artifact.metadata["target_required"] is False
+        for artifact in plan.artifacts
+    )
+    assert plan.configuration["target"] == {}
+
+    try:
+        engine.execute(plan.migration_plan_id, context)
+        assert False, "Assessment-only execution should be rejected"
+    except PermissionError:
+        pass
+
+
+def test_assess_mode_without_target_infers_assessment_only(tmp_path):
+    config = MigrationConfig.from_dict(
+        {
+            "migration": {
+                "unity_catalog": {"mode": "ASSESS"},
+                "dry_run": True,
+            },
+            "source": {"workspace": "source-workspace"},
+        }
+    )
+
+    assert config.assessment_only is True
+    assert config.target_workspace == {}

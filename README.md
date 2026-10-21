@@ -54,6 +54,13 @@ The package name matches the project metadata and Python import package. Upgrade
 dbutils.library.restartPython()
 ```
 
+If `ModuleNotFoundError: No module named 'dbxmigrator'` persists after installation:
+
+1. Confirm that the package installed successfully in the notebook environment.
+2. Restart the Python process with `dbutils.library.restartPython()`.
+3. Detach and reattach a Spark cluster if package caches remain stale.
+4. If the notebook is imported without package installation, leave the `package_source` widget at its GitHub default; it attempts an automatic fallback installation.
+
 ### Install from Databricks Repos
 
 1. Clone this repository into Databricks Repos in the source workspace.
@@ -114,6 +121,34 @@ Supported authentication modes:
 - `TOKEN_SECRET`: resolve `auth.secret_scope` and `auth.secret_key` through the notebook's Databricks Secret utility.
 
 Do not place `token`, `access_token`, `password`, or `client_secret` values in the migration YAML.
+
+## Assessment-only mode
+
+Use assessment-only mode when source discovery must happen before a target workspace exists:
+
+```yaml
+migration:
+  scope: ALL
+  workspace_artifacts: true
+  data:
+    enabled: true
+  unity_catalog:
+    mode: ASSESS
+  assessment_only: true
+  dry_run: true
+
+source:
+  workspace: source-workspace-name
+  region: eastus
+  auth:
+    type: DEFAULT
+
+# The target section is optional in this mode.
+```
+
+Assessment-only plans inventory source workspace, data, Hive, DBFS, and governance dependencies. They produce migration and dependency records without creating a target client, registering UC objects, copying data, or recreating artifacts.
+
+Setting `unity_catalog.mode: ASSESS` enables assessment behavior. Setting `assessment_only: true` prevents any execution. A target can be added later by creating a new migration plan or changing the plan configuration and explicitly setting `assessment_only: false`.
 
 ## Default safety behavior
 

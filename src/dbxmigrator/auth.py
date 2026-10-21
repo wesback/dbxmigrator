@@ -11,6 +11,8 @@ def build_workspace_client(
     workspace_client_class: Any = None,
 ) -> Any | None:
     """Build an SDK client without storing credentials in migration YAML."""
+    if not workspace_config:
+        return None
     if workspace_client_class is None:
         try:
             from databricks.sdk import WorkspaceClient

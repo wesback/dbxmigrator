@@ -143,6 +143,16 @@ class MigrationEngine:
         context: Any,
     ) -> MigrationPlan:
         plan = self.store.load_plan(migration_plan_id)
+        migration_config = plan.configuration.get("migration", {})
+        if migration_config.get("assessment_only", False):
+            raise PermissionError(
+                "Assessment-only plans cannot execute migrations; "
+                "create a plan with assessment_only=false after configuring the target"
+            )
+        if not plan.configuration.get("target"):
+            raise PermissionError(
+                "Execution requires target workspace configuration"
+            )
         if plan.lifecycle_state != "APPROVED":
             raise PermissionError(
                 "Execution requires an APPROVED migration plan; "

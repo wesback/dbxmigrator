@@ -16,6 +16,7 @@ from .planning import MigrationPlanner
 from .registry import ArtifactHandlerRegistry, ArtifactHandler
 from .store import MigrationStore
 from .auth import build_workspace_client
+from .config import MigrationConfig
 
 __all__ = [
     "Artifact",
@@ -33,4 +34,5 @@ __all__ = [
     "ArtifactHandler",
     "MigrationStore",
     "build_workspace_client",
+    "MigrationConfig",
 ]

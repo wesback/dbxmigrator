@@ -235,6 +235,42 @@ migration:
 
 `ASSESS` produces proposed mappings, external-table candidates, managed-table candidates, identities, permissions, storage dependencies, code changes, and blockers. It does not mutate Unity Catalog.
 
+### Assessment-only inventory without a target
+
+Use a configuration based on [`config/assessment-only.yaml`](../config/assessment-only.yaml) when cataloging the source before the target workspace is available.
+
+```yaml
+migration:
+  scope: ALL
+  workspace_artifacts: true
+  data:
+    enabled: true
+  unity_catalog:
+    mode: ASSESS
+  assessment_only: true
+  dry_run: true
+
+source:
+  workspace: source-workspace-name
+  region: eastus
+  auth:
+    type: DEFAULT
+
+# No target section is required.
+```
+
+Assessment-only discovery:
+
+- Inventories every supported artifact in the source.
+- Records workspace, data, and governance dependencies.
+- Produces migration dispositions and a complete inventory ledger.
+- Does not create a target SDK client.
+- Does not copy or register data.
+- Does not create or update Unity Catalog objects.
+- Cannot execute migrations.
+
+Execution remains blocked until a new non-assessment plan is approved with a configured target workspace.
+
 ### REGISTER
 
 `REGISTER` is intended for registering existing external data without physically copying it. The plan must distinguish the data location from the catalog registration.
