@@ -42,24 +42,60 @@ Validation
 2. Install the package on the migration notebook:
 
 ```python
-%pip install -e /Workspace/Repos/<owner>/dbxmigrator
+%pip install -e /Workspace/Repos/wesback/dbxmigrator
 ```
 
 Add Databricks SDK support with:
 
 ```python
-%pip install -e "/Workspace/Repos/<owner>/dbxmigrator[databricks]"
+%pip install -e "/Workspace/Repos/wesback/dbxmigrator[databricks]"
 ```
 
 3. Import `notebooks/migration_accelerator.py` as a Databricks notebook.
 4. Upload or place `config/example-migration.yaml` under `/Workspace/Shared/dbxmigrator/config.yaml`.
-5. Update the source and target settings.
+5. Update the source and target settings:
+   - Source uses the notebook's Databricks SDK identity by default.
+   - Target must be identified by its workspace URL under `target.host`.
+   - Use `auth.type: DEFAULT`, `PROFILE`, or `TOKEN_SECRET`.
+   - Store target tokens in a Databricks secret scope; never put tokens directly in YAML.
 6. Set the notebook widgets:
    - `config_path` to the configuration path
    - `action` to `dry_run`
 7. Run the notebook and save the reported `migration_plan_id`.
 
 For the complete operator workflow, see [docs/manual.md](docs/manual.md).
+
+## Workspace and authentication configuration
+
+Source and destination workspaces are configured in the top-level `source` and `target` sections:
+
+```yaml
+source:
+  workspace: source-workspace-name
+  region: eastus
+  host: https://adb-SOURCE-WORKSPACE.azuredatabricks.net
+  auth:
+    type: DEFAULT
+
+target:
+  workspace: target-workspace-name
+  region: westus
+  host: https://adb-TARGET-WORKSPACE.azuredatabricks.net
+  auth:
+    type: TOKEN_SECRET
+    secret_scope: dbxmigrator
+    secret_key: target-workspace-token
+```
+
+The notebook runs in the source workspace and creates one SDK client for discovery. It creates a separate SDK client for target mutations.
+
+Supported authentication modes:
+
+- `DEFAULT`: use SDK environment, notebook context, Azure identity, or other SDK-supported credentials.
+- `PROFILE`: use `auth.profile` with a Databricks CLI profile.
+- `TOKEN_SECRET`: resolve `auth.secret_scope` and `auth.secret_key` through the notebook's Databricks Secret utility.
+
+Do not place `token`, `access_token`, `password`, or `client_secret` values in the migration YAML.
 
 ## Default safety behavior
 

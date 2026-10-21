@@ -64,18 +64,25 @@ try:
 except ImportError:
     WorkspaceClient = None
 
+from dbxmigrator.auth import build_workspace_client
+
 
 config = load_config(config_path)
 store_root = config.storage.get("plan_store", "/dbfs/migration-plans")
 store = MigrationStore(store_root)
 engine = MigrationEngine(default_registry(), store)
 
-source_client = WorkspaceClient() if WorkspaceClient else None
-target_client = None
-target_host = config.target_workspace.get("host")
-target_token = config.target_workspace.get("token")
-if target_host and target_token and WorkspaceClient:
-    target_client = WorkspaceClient(host=target_host, token=target_token)
+secret_resolver = lambda scope, key: dbutils.secrets.get(scope, key)
+source_client = build_workspace_client(
+    config.source_workspace,
+    secret_resolver=secret_resolver,
+    workspace_client_class=WorkspaceClient,
+) if WorkspaceClient else None
+target_client = build_workspace_client(
+    config.target_workspace,
+    secret_resolver=secret_resolver,
+    workspace_client_class=WorkspaceClient,
+) if WorkspaceClient else None
 
 context = DatabricksContext(source_client, target_client)
 

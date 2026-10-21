@@ -20,7 +20,7 @@ The accelerator does not treat Unity Catalog, physical data migration, or worksp
 Example package installation:
 
 ```python
-%pip install -e "/Workspace/Repos/<owner>/dbxmigrator[databricks]"
+%pip install -e "/Workspace/Repos/wesback/dbxmigrator[databricks]"
 dbutils.library.restartPython()
 ```
 
@@ -70,11 +70,19 @@ source:
   workspace: source-workspace-name
   workspace_id: "1234567890123456"
   region: eastus
+  host: https://adb-1234567890123456.azuredatabricks.net
+  auth:
+    type: DEFAULT
 
 target:
   workspace: target-workspace-name
   workspace_id: "9876543210987654"
   region: westus
+  host: https://adb-9876543210987654.azuredatabricks.net
+  auth:
+    type: TOKEN_SECRET
+    secret_scope: dbxmigrator
+    secret_key: target-workspace-token
 ```
 
 ### Configuration fields
@@ -92,6 +100,72 @@ target:
 | `migration.storage.plan_store` | Durable directory for plans and event ledgers |
 | `source` | Source workspace identity and regional metadata |
 | `target` | Target workspace identity and regional metadata |
+| `source.host` | Optional source workspace URL |
+| `target.host` | Required target workspace URL for target SDK authentication |
+| `source.auth` / `target.auth` | Authentication configuration; credentials must not be written into YAML |
+
+## Workspace and authentication configuration
+
+Source and destination workspaces are defined in the top-level `source` and `target` sections.
+
+The source workspace is the workspace where the migration notebook runs. The source SDK client uses:
+
+- The notebook's Databricks SDK environment by default
+- An optional `source.host` URL
+- An optional Databricks CLI profile
+- A secret-backed token only when explicitly configured
+
+The target workspace is identified by `target.host`, which should be the target workspace URL. It uses a separate SDK client so source discovery and target mutation do not share identity assumptions.
+
+Supported authentication modes:
+
+| Mode | Configuration | Recommended use |
+|---|---|---|
+| `DEFAULT` | `auth.type: DEFAULT` | Source workspace or environments where the SDK has an automatic notebook identity and host |
+| `PROFILE` | `auth.type: PROFILE`, plus `auth.profile` | Interactive or local SDK credentials with an existing Databricks CLI profile |
+| `TOKEN_SECRET` | `auth.type: TOKEN_SECRET`, `auth.secret_scope`, `auth.secret_key`, and `target.host` | Secret-backed token authentication in the migration notebook |
+
+`DEFAULT` authentication never reads a token from migration YAML. Depending on SDK configuration, it can use the current Databricks environment, environment variables, Azure identity, or configured SDK credentials.
+
+Example profile authentication:
+
+```yaml
+source:
+  host: https://adb-SOURCE-WORKSPACE.azuredatabricks.net
+  auth:
+    type: PROFILE
+    profile: source-workspace
+
+target:
+  host: https://adb-TARGET-WORKSPACE.azuredatabricks.net
+  auth:
+    type: PROFILE
+    profile: target-workspace
+```
+
+Example secret-backed target authentication:
+
+```yaml
+target:
+  host: https://adb-TARGET-WORKSPACE.azuredatabricks.net
+  auth:
+    type: TOKEN_SECRET
+    secret_scope: dbxmigrator
+    secret_key: target-workspace-token
+```
+
+Create the target secret in the source workspace before running the notebook:
+
+```python
+# Run once as an authorized administrator
+dbutils.secrets.put(
+    scope="dbxmigrator",
+    key="target-workspace-token",
+    string_value="<target-access-token>",
+)
+```
+
+The notebook resolves that secret only when `TOKEN_SECRET` authentication is selected. The token is passed to the Databricks SDK and is not written to the migration plan.
 
 Artifact type values include `NOTEBOOK`, `JOB`, `PIPELINE`, `CLUSTER`, `CLUSTER_POLICY`, `POOL`, `SQL_WAREHOUSE`, `QUERY`, `DASHBOARD`, `ALERT`, `MLFLOW`, `SERVING`, `SECRET_SCOPE`, `HIVE_TABLE`, `DBFS`, `VOLUME`, `CHECKPOINT`, `LEGACY_MOUNT`, and others defined by the core model.
 

@@ -13,7 +13,17 @@ migration:
 source:
   workspace: source-workspace
   region: region-a
+  # The source runs in the source workspace; SDK default authentication uses
+  # the notebook identity or configured Databricks SDK credentials.
+  auth:
+    type: DEFAULT
 
 target:
   workspace: target-workspace
   region: region-b
+  # Replace with the target workspace URL from the Azure/Databricks workspace page.
+  host: https://adb-YOUR-WORKSPACE-ID.azuredatabricks.net
+  auth:
+    type: TOKEN_SECRET
+    secret_scope: dbxmigrator
+    secret_key: target-workspace-token
