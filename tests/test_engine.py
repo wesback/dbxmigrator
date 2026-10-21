@@ -149,3 +149,83 @@ def test_assess_mode_without_target_infers_assessment_only(tmp_path):
 
     assert config.assessment_only is True
     assert config.target_workspace == {}
+
+
+def test_cluster_discovery_and_migration_handler_are_available(tmp_path):
+    context = make_context(
+        clusters=[
+            {
+                "cluster_id": "source-cluster-1",
+                "cluster_name": "analytics-cluster",
+                "spark_version": "15.4.x-scala2.12",
+                "node_type_id": "Standard_D4s_v5",
+                "num_workers": 2,
+            }
+        ]
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore(tmp_path))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(
+            dry_run=True,
+            unity_catalog_mode="NONE",
+            source_workspace={"workspace": "source"},
+            target_workspace={"workspace": "target"},
+        ).to_dict(),
+    )
+
+    cluster = next(
+        artifact for artifact in plan.artifacts
+        if artifact.artifact_type.value == "CLUSTER"
+    )
+    assert cluster.identity.source_id == "source-cluster-1"
+    assert cluster.migration_strategy == "CREATE_CLUSTER_WITH_TARGET_CONFIGURATION"
+    assert cluster.migration_provider == "Databricks SDK"
+
+
+def test_menu_artifact_types_are_registered_for_assessment():
+    context = make_context(
+        clusters=[{"cluster_id": "cluster-1", "cluster_name": "cluster"}],
+        pipelines=[{"pipeline_id": "pipeline-1", "name": "dlt"}],
+        runs=[{"run_id": 101, "run_name": "historical-run"}],
+        dashboards=[{"id": "dashboard-1", "name": "Sales"}],
+        warehouses=[{"id": "warehouse-1", "name": "Analytics"}],
+        queries=[{"id": "query-1", "name": "Revenue"}],
+        alerts=[{"id": "alert-1", "name": "Threshold"}],
+        experiments=[{"experiment_id": "exp-1", "name": "Experiment"}],
+        models=[{"name": "customer-model", "model_id": "model-1"}],
+        features=[{"name": "customer_features"}],
+        agents=[{"id": "agent-1", "name": "Support"}],
+        serving_endpoints=[{"name": "model-endpoint"}],
+        catalogs=[{"name": "main"}],
+        schemas=[{"catalog_name": "main", "name": "default"}],
+        uc_functions=[{"catalog_name": "main", "name": "fn"}],
+    )
+    engine = MigrationEngine(default_registry(), MigrationStore("/tmp/dbxmigrator-menu-test"))
+    plan = engine.create_dry_run(
+        context,
+        MigrationConfig(
+            dry_run=True,
+            assessment_only=True,
+            unity_catalog_mode="ASSESS",
+        ).to_dict(),
+    )
+
+    discovered_types = {artifact.artifact_type.value for artifact in plan.artifacts}
+    expected = {
+        "CLUSTER",
+        "PIPELINE",
+        "RUN",
+        "DASHBOARD",
+        "SQL_WAREHOUSE",
+        "QUERY",
+        "ALERT",
+        "EXPERIMENT",
+        "MODEL",
+        "FEATURE",
+        "AGENT",
+        "SERVING",
+        "CATALOG",
+        "SCHEMA",
+    }
+    assert expected.issubset(discovered_types)

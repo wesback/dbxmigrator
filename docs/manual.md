@@ -49,7 +49,7 @@ The notebook supports these prefixes:
 |---|---|
 | `/Workspace/...` | Databricks workspace file |
 | `workspace:/...` | Databricks workspace file |
-| `dbfs:/...` | DBFS-mounted file |
+| `dbfs:/...` | Legacy DBFS path; plan-store paths are normalized to `/Workspace/Shared/dbxmigrator` |
 | No prefix | Local filesystem path on the notebook cluster |
 
 ## Configuration
@@ -73,7 +73,7 @@ migration:
   exclude_artifact_types: []
 
   storage:
-    plan_store: /dbfs/migration-plans
+    plan_store: /Workspace/Shared/dbxmigrator/plans
 
 source:
   workspace: source-workspace-name
@@ -106,7 +106,7 @@ target:
 | `migration.dry_run` | Must remain `true` during discovery and review |
 | `migration.include_artifact_types` | Optional allowlist of artifact types |
 | `migration.exclude_artifact_types` | Optional denylist of artifact types |
-| `migration.storage.plan_store` | Durable directory for plans and event ledgers |
+| `migration.storage.plan_store` | Durable directory for plans and event ledgers. Prefer `/Workspace/Shared/...`; legacy `/dbfs/...` roots are normalized automatically |
 | `source` | Source workspace identity and regional metadata |
 | `target` | Target workspace identity and regional metadata |
 | `source.host` | Optional source workspace URL |
@@ -449,7 +449,7 @@ Plans contain artifact definitions, hashes, dependencies, dispositions, blockers
 
 For disaster recovery:
 
-1. Export `/dbfs/migration-plans/<migration_plan_id>/migration_plan.json`.
+1. Export the configured plan store, for example `/Workspace/Shared/dbxmigrator/plans/<migration_plan_id>/migration_plan.json`.
 2. Retain the matching `events.jsonl`.
 3. Record approval outside the plan system according to change-control requirements.
 4. Do not execute a plan if plan and event files are missing, inconsistent, or inaccessible.

@@ -16,9 +16,66 @@ def utc_now() -> str:
 class MigrationStore:
     def __init__(self, root: str | Path | None = None) -> None:
         if root is None:
-            root = "/tmp/dbxmigrator-plans"
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+            root = "/Workspace/Shared/dbxmigrator/plans"
+
+        requested_root = self.normalize_root(root)
+        candidates = [requested_root]
+        if str(requested_root).startswith("/dbfs/"):
+            relative = str(requested_root)[len("/dbfs/") :]
+            candidates.insert(
+                0,
+                Path("/Workspace/Shared/dbxmigrator") / relative,
+            )
+
+        candidates.extend([
+            Path("/Workspace/Shared/dbxmigrator/plans"),
+            Path("/tmp/dbxmigrator-plans"),
+        ])
+
+        selected = None
+        last_error = None
+        seen = set()
+        for candidate in candidates:
+            candidate = Path(candidate)
+            if str(candidate) in seen:
+                continue
+            seen.add(str(candidate))
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                probe = candidate / ".write-test"
+                with probe.open("w", encoding="utf-8") as handle:
+                    handle.write("ok")
+                probe.unlink()
+                selected = candidate
+                break
+            except (OSError, PermissionError) as exc:
+                last_error = exc
+
+        if selected is None:
+            raise RuntimeError(
+                "No migration plan store location is writable. "
+                f"Configured root: {requested_root}. "
+                f"Last filesystem error: {last_error}"
+            )
+
+        self.requested_root = requested_root
+        self.root = selected
+        self.fallback_used = selected != requested_root
+
+    @staticmethod
+    def normalize_root(root: str | Path) -> Path:
+        value = str(root)
+        if value.startswith("dbfs:/"):
+            relative = value[len("dbfs:/") :].lstrip("/")
+            if relative:
+                return Path("/Workspace/Shared/dbxmigrator") / relative
+            return Path("/Workspace/Shared/dbxmigrator/plans")
+        if value.startswith("/dbfs/"):
+            relative = value[len("/dbfs/") :].lstrip("/")
+            if relative:
+                return Path("/Workspace/Shared/dbxmigrator") / relative
+            return Path("/Workspace/Shared/dbxmigrator/plans")
+        return Path(value)
 
     def create_plan(self, configuration: dict[str, Any]) -> MigrationPlan:
         plan_id = str(uuid4())

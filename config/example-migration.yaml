@@ -8,7 +8,7 @@ migration:
   conflict_strategy: FAIL
   dry_run: true
   storage:
-    plan_store: /dbfs/migration-plans
+    plan_store: /Workspace/Shared/dbxmigrator/plans
 
 source:
   workspace: source-workspace

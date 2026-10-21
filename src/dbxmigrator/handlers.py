@@ -173,6 +173,154 @@ class JobHandler(ArtifactHandler):
         )
 
 
+class ClusterHandler(ArtifactHandler):
+    artifact_types = (ArtifactType.CLUSTER,)
+    provider = "Databricks SDK"
+
+    def discover(self, context: Any) -> Iterable[Artifact]:
+        payload = _dict_source(context, "clusters")
+        if payload is not None:
+            for item in payload:
+                yield self._from_payload(item)
+            return
+
+        client = _sdk_context(context)
+        clusters = getattr(client, "clusters", None)
+        if clusters is None or not hasattr(clusters, "list"):
+            return
+        for item in clusters.list():
+            yield self._from_payload(_as_dict(item))
+
+    def _from_payload(self, item: Any) -> Artifact:
+        payload = _as_dict(item)
+        cluster_id = payload.get("cluster_id") or payload.get("id")
+        name = payload.get("cluster_name") or payload.get("name") or cluster_id
+        return Artifact(
+            identity=ArtifactIdentity(
+                key=f"CLUSTER:{cluster_id or name}",
+                artifact_type=ArtifactType.CLUSTER,
+                source_id=str(cluster_id) if cluster_id is not None else None,
+                name=str(name),
+            ),
+            source_definition=payload,
+            migration_strategy="CREATE_CLUSTER_WITH_TARGET_CONFIGURATION",
+            validation_strategy="VERIFY_CLUSTER_DEFINITION",
+            migration_provider=self.provider,
+        )
+
+    def migrate(self, context: Any, artifact: Artifact) -> dict[str, Any]:
+        client = getattr(context, "target_client", None)
+        if client is None:
+            raise NotImplementedError(
+                "No target Databricks SDK client is configured"
+            )
+        clusters = getattr(client, "clusters", None)
+        if clusters is None or not hasattr(clusters, "create"):
+            raise NotImplementedError(
+                "Target Databricks SDK does not expose cluster creation"
+            )
+
+        source = artifact.source_definition
+        allowed_fields = (
+            "cluster_name",
+            "spark_version",
+            "node_type_id",
+            "driver_node_type_id",
+            "num_workers",
+            "autoscale",
+            "autotermination_minutes",
+            "enable_elastic_disk",
+            "data_security_mode",
+            "runtime_engine",
+            "spark_conf",
+            "spark_env_vars",
+            "ssh_public_keys",
+            "custom_tags",
+            "init_scripts",
+            "cluster_log_conf",
+            "instance_pool_id",
+            "driver_instance_pool_id",
+            "policy_id",
+            "docker_image",
+            "workload_type",
+            "single_user_name",
+            "kind",
+            "use_cloud_spot",
+            "aws_attributes",
+            "azure_attributes",
+            "gcp_attributes",
+        )
+        create_spec = {
+            field: source[field]
+            for field in allowed_fields
+            if field in source and source[field] is not None
+        }
+        if not create_spec.get("cluster_name"):
+            create_spec["cluster_name"] = artifact.identity.name
+        result = clusters.create(**create_spec)
+        target_id = getattr(result, "cluster_id", None)
+        if target_id is None and isinstance(result, dict):
+            target_id = result.get("cluster_id")
+        return {
+            "target_cluster_id": target_id,
+            "create_spec": create_spec,
+        }
+
+    def validate_migration(self, context: Any, artifact: Artifact) -> bool:
+        result = artifact.metadata.get("migration_result", {})
+        target_id = result.get("target_cluster_id")
+        if not target_id:
+            return False
+        client = getattr(context, "target_client", None)
+        clusters = getattr(client, "clusters", None) if client else None
+        if clusters is None or not hasattr(clusters, "get"):
+            return True
+        try:
+            clusters.get(target_id)
+            return True
+        except Exception:
+            return False
+
+    def analyze_dependencies(self, context: Any, artifact: Artifact) -> Artifact:
+        source = artifact.source_definition
+        dependencies = []
+
+        for field_name, dependency_type in (
+            ("policy_id", "CLUSTER_POLICY"),
+            ("instance_pool_id", "POOL"),
+            ("driver_instance_pool_id", "POOL"),
+        ):
+            reference = source.get(field_name)
+            if reference:
+                dependencies.append(
+                    Dependency(
+                        target_key=f"{dependency_type}:{reference}",
+                        dependency_type=dependency_type,
+                        reference=str(reference),
+                        resolution=DependencyResolution.UNRESOLVED,
+                    )
+                )
+
+        for cluster_spec in source.get("init_scripts", []) or []:
+            reference = (
+                cluster_spec.get("workspace", {}).get("destination")
+                if isinstance(cluster_spec, dict)
+                else None
+            )
+            if reference:
+                dependencies.append(
+                    Dependency(
+                        target_key=f"FILE:{reference}",
+                        dependency_type="INIT_SCRIPT",
+                        reference=str(reference),
+                        resolution=DependencyResolution.UNRESOLVED,
+                    )
+                )
+
+        artifact.dependencies = dependencies
+        return artifact
+
+
 class GenericInventoryHandler(ArtifactHandler):
     def __init__(
         self,
@@ -249,6 +397,7 @@ def default_registry() -> ArtifactHandlerRegistry:
     registry.register_many(
         NotebookHandler(),
         JobHandler(),
+        ClusterHandler(),
         GenericInventoryHandler(
             ArtifactType.CLUSTER_POLICY,
             ("cluster_policies", "policies"),
@@ -258,11 +407,6 @@ def default_registry() -> ArtifactHandlerRegistry:
             ArtifactType.POOL,
             ("pools", "instance_pools"),
             "CREATE_INSTANCE_POOL",
-        ),
-        GenericInventoryHandler(
-            ArtifactType.CLUSTER,
-            ("clusters",),
-            "CREATE_CLUSTER_OR_SKIP_EPHEMERAL",
         ),
         GenericInventoryHandler(
             ArtifactType.WAREHOUSE,
@@ -313,6 +457,96 @@ def default_registry() -> ArtifactHandlerRegistry:
             ArtifactType.SERVING,
             ("serving_endpoints", "serving_resources"),
             "RECREATE_SERVING_ENDPOINT",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.RUN,
+            ("runs", "job_runs"),
+            "SKIP_OR_REPLAY_WORKFLOW_HISTORY",
+            provider="Databricks SDK / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.EXPERIMENT,
+            ("experiments", "mlflow_experiments"),
+            "EXPORT_MLFLOW_METADATA_AND_MODELS",
+            provider="MLflow / Databricks SDK",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.MODEL,
+            ("models", "registered_models"),
+            "EXPORT_OR_CLONE_MODEL_REGISTRY_RESOURCE",
+            provider="MLflow / Unity Catalog",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.FEATURE,
+            ("features", "feature_tables"),
+            "ASSESS_FEATURE_STORE_DEPENDENCY",
+            provider="Databricks SDK / Unity Catalog",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.GENIE_AGENT,
+            ("genie_agents", "genie_spaces"),
+            "EXPORT_IMPORT_OR_MANUAL",
+            provider="Workspace API / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.AGENT,
+            ("agents", "agent_deployments"),
+            "EXPORT_IMPORT_OR_MANUAL",
+            provider="Databricks SDK / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.APP,
+            ("apps",),
+            "RECREATE_APP_AND_CONFIGURATION",
+            provider="Databricks SDK / Workspace API",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.AI_GATEWAY,
+            ("ai_gateways",),
+            "RECREATE_AI_GATEWAY_CONFIGURATION",
+            provider="Databricks SDK / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.AI_PLAYGROUND,
+            ("ai_playgrounds",),
+            "MANUAL_OR_EXPORT_PLAYGROUND_STATE",
+            provider="Workspace API / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.DATA_INGESTION,
+            ("data_ingestions", "ingestion_pipeline"),
+            "RECREATE_INGESTION_CONFIGURATION",
+            provider="Databricks SDK / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.VISUAL_DATA_PREP,
+            ("visual_data_prep", "data_prep_flows"),
+            "EXPORT_IMPORT_OR_MANUAL",
+            provider="Workspace API / Manual",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.QUERY_HISTORY,
+            ("query_history",),
+            "AUDIT_ONLY",
+            provider="SQL / Databricks SDK",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.CATALOG,
+            ("catalogs", "uc_catalogs"),
+            "UC_ASSESS_OR_REGISTER_OR_MIGRATE",
+            provider="SQL / UCX",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.SCHEMA,
+            ("schemas", "uc_schemas"),
+            "UC_ASSESS_OR_REGISTER_OR_MIGRATE",
+            provider="SQL / UCX",
+        ),
+        GenericInventoryHandler(
+            ArtifactType.UC_FUNCTION,
+            ("functions", "uc_functions"),
+            "EXPORT_CREATE_FUNCTION_OR_MANUAL",
+            provider="SQL / Databricks SDK",
         ),
         GenericInventoryHandler(
             ArtifactType.HIVE_DATABASE,

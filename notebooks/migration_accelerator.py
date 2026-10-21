@@ -105,7 +105,10 @@ except ImportError:
 
 
 config = load_config(config_path)
-store_root = config.storage.get("plan_store", "/dbfs/migration-plans")
+store_root = config.storage.get(
+    "plan_store",
+    "/Workspace/Shared/dbxmigrator/plans",
+)
 store = MigrationStore(store_root)
 engine = MigrationEngine(default_registry(), store)
 

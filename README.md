@@ -161,7 +161,7 @@ Execution requires:
 3. Explicit approval of the plan ID
 4. A successful approval-time drift check
 
-Approved plans are stored as JSON under the configured plan store. Use a durable location such as `/dbfs/migration-plans` or a mounted or workspace-accessible storage location.
+Approved plans are stored as JSON under the configured plan store. Use a durable workspace location such as `/Workspace/Shared/dbxmigrator/plans`.
 
 ## Status model
 
@@ -203,6 +203,26 @@ Unity Catalog is optional and independent of workspace migration:
 
 Workspace migration can proceed in `NONE` mode. UC state does not define workspace artifact identity or migration state.
 
+## Databricks menu artifact coverage
+
+The screenshot's Databricks workspace menu is audited against the registered artifact handlers. The current implementation covers:
+
+| Menu area | Artifact coverage |
+|---|---|
+| Workspace | Notebooks and workspace files |
+| Jobs / Runs | Jobs and job-run inventory; run history is audit data, not a normal recreation target |
+| Compute | Interactive clusters, cluster policies, and instance pools |
+| SQL | Warehouses, SQL queries, dashboards, alerts, and warehouse/query dependencies |
+| Data Engineering | Pipelines and data ingestion configuration |
+| Catalog | Unity Catalog catalogs, schemas, tables, volumes, functions, credentials, locations, and mounts |
+| AI/ML | Experiments, registered models, features, serving endpoints, agents, and apps where SDK/API discovery is available |
+| Query History | Inventory-only audit surface; not an executable migrated workspace artifact |
+| Marketplace, Genie Agents, Playground, and some preview surfaces | Recorded as assessment candidates or manual-only when a stable migration API is unavailable |
+
+Clusters are move candidates. The accelerator copies cluster configuration to the target and validates target cluster existence. Cluster policy, instance pool, init-script, secret, identity, network, and library dependencies are separately resolved for runtime readiness. Interactive clusters may contain ephemeral state and should not be treated as data-migration mechanisms.
+
+Every handler must produce a ledger disposition. Unsupported surfaces are never silently omitted.
+
 ## Configuration
 
 The example configuration is [`config/example-migration.yaml`](config/example-migration.yaml):
@@ -218,7 +238,7 @@ migration:
   conflict_strategy: FAIL
   dry_run: true
   storage:
-    plan_store: /dbfs/migration-plans
+    plan_store: /Workspace/Shared/dbxmigrator/plans
 ```
 
 Supported Unity Catalog modes, dimensions, and lifecycle states are described in [docs/manual.md](docs/manual.md).
